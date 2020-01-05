@@ -17,7 +17,7 @@ def evaluate(players, games, randomized, render):
             try:
                 while game.winner is None:
                     game.move(players[to_play].play(game.clone()))
-                    to_play = 1 - to_play
+                    to_play = game.to_play
                     if render:
                         game.render()
                         time.sleep(0.3)

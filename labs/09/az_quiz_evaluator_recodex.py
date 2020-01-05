@@ -17,10 +17,10 @@ def evaluate(player, games=50, randomized=False):
     for i in range(games):
         for to_start in range(2):
             game = az_quiz.AZQuiz(randomized)
-            to_play = to_start
+            to_play = 1 - to_play
             while game.winner is None:
                 game.move(players[to_play].play(game.clone()))
-                to_play = 1 - to_play
+                to_play = game.to_play
             if to_play == 1:
                 wins[to_start] += 1
 
