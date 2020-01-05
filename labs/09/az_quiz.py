@@ -6,12 +6,13 @@ class AZQuiz:
     N = 7
     C = 4
 
-    def __init__(self, randomized):
+    def __init__(self, randomized, history=None):
         self._board = np.zeros([self.N, self.N], dtype=np.uint8)
         self._randomized = randomized
         self._to_play = 0
         self._winner = None
         self._viewer = None
+        self.history = history or []
 
     def clone(self):
         clone = AZQuiz(self._randomized)
@@ -36,6 +37,9 @@ class AZQuiz:
     def winner(self):
         return self._winner
 
+    def apply(self, action):
+        self.history.append(action)
+
     def swap_players(self):
         self._board = self._SWAP_PLAYERS[self._board]
         self._to_play = 1 - self._to_play
@@ -44,6 +48,10 @@ class AZQuiz:
     def valid(self, action):
         return self._winner is None and action >= 0 and action < self.actions \
             and self._board[self._ACTION_Y[action], self._ACTION_X[action]] < 2
+
+    def legal_actions(self):
+        legal = [a for a in range(0, self.actions) if self.valid(a)]
+        return legal
 
     def move(self, action):
         return self._move(action, np.random.uniform() if self._randomized else 0)

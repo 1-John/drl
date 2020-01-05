@@ -7,7 +7,6 @@ from typing import List
 
 
 class AlphaZeroConfig(object):
-
     def __init__(self):
         ### Self-Play
         self.num_sampling_moves = 15  # 30
@@ -39,7 +38,7 @@ class AlphaZeroConfig(object):
         }
         self.input_size = (29,)  # 28 fields + 1 for player
         self.learning_rate = 0.002
-        self.hidden_layer_size = 128
+        self.hidden_layer_size = 1
         self.network = Network(self)
 
 
@@ -48,8 +47,8 @@ class Node(object):
     def __init__(self, prior: float):
         self.visit_count = 0
         self.to_play = -1
-        self.prior = prior
-        self.value_sum = 0
+        self.prior = 0.03571  # 1/28
+        self.value_sum = 0  # "sum" of value function of the children
         self.children = {}
 
     def expanded(self):
@@ -120,14 +119,8 @@ class Network:
         # Use Adam optimizer with given `args.learning_rate` for both models.
         actions = 28
         input_layer = tf.keras.layers.Input(shape=args.input_size)
-        conv = tf.keras.layers.MaxPool2D(4, 2)(input_layer)
-        conv = tf.keras.layers.Conv2D(16, 3, 2, padding='same')(conv)
-        conv = tf.keras.layers.MaxPool2D(4, 2)(conv)
-        conv = tf.keras.layers.Dropout(0.7)(conv)
-        conv = tf.keras.layers.Flatten()(conv)
-
-        output_layer = tf.keras.layers.Dense(args.hidden_layer_size, activation='relu')(conv)
-        output_layer = tf.keras.layers.Dense(actions, activation='softmax')(output_layer)
+        hidden_layer = tf.keras.layers.Dense(args.hidden_layer_size, activation='relu')(input_layer)
+        output_layer = tf.keras.layers.Dense(actions,)(hidden_layer)
         self.model = tf.keras.Model(inputs=[input_layer], outputs=[output_layer])
 
         self.model.compile(
@@ -139,9 +132,11 @@ class Network:
         print(self.model.summary())
 
     def train(self, states, actions, returns):
-        actions = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), actions)))
-        returns = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), returns)))
-        states = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), states)))
+        #games = state. return = revard of the state. actions - possible actions
+        # actions = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), actions)))
+        # returns = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), returns)))
+        # states = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), states)))
+        # np.array(list(reduce)) #TODO MUSI ZUSTAT
 
 
         # Train the model using the states, actions and observed returns.
@@ -157,7 +152,7 @@ class Network:
         # - train the `baseline` model to predict `returns`
         # self.baseline.train_on_batch(states, returns)
 
-        def predict(self, states):
+    def predict(self, states):
         states = np.array(states, np.float32)
         return self.model.predict(states)
 
@@ -205,7 +200,7 @@ def alphazero(config: AlphaZeroConfig):
     # replay_buffer = ReplayBuffer(config)
 
     run_selfplay(config)#, storage, replay_buffer)
-    train_network(config)#, storage, replay_buffer)
+    # train_network(config)#, storage, replay_buffer)
 
     return #storage.latest_network()
 
@@ -226,14 +221,13 @@ def run_selfplay(config: AlphaZeroConfig):#,
 # of the game is reached.
 def play_game(config: AlphaZeroConfig):
     game = az_quiz.AZQuiz()
-    moves = 0
-    while not game.winner and moves < config.max_moves:
+
+    while not game.winner and len(game.history) < config.max_moves:
       # while not game.winner and len(game.history) < config.max_moves:
         action, root = run_mcts(config, game)
-        moves += 1
 
-        # game.apply(action)  # self.history.append(action)
-        # game.store_search_statistics(root) #TODO tohle vypada dulezite
+        game.apply(action)  # self.history.append(action)
+        # game.store_search_statistics(root)
     return game
 
 
@@ -263,13 +257,14 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
 
         value = evaluate(node, scratch_game, config.network)
         backpropagate(search_path, value, scratch_game.to_play())
+
     return select_action(config, game, root), root
 
 
 def select_action(config: AlphaZeroConfig, game: az_quiz, root: Node):
     visit_counts = [(child.visit_count, action)
                     for action, child in root.children.iteritems()]
-    if len(game.history) < config.num_sampling_moves:
+    if game.history < config.num_sampling_moves:
         _, action = softmax_sample(visit_counts)
     else:
         _, action = max(visit_counts)
@@ -297,7 +292,8 @@ def ucb_score(config: AlphaZeroConfig, parent: Node, child: Node):
 
 # We use the neural network to obtain a value and policy prediction.
 def evaluate(node: Node, game: az_quiz, network: Network):
-    value, policy_logits = network.inference(game.make_image(-1))
+    value, policy_logits = network.GET_POLICY
+
 
     # Expand the node.
     node.to_play = game.to_play()
@@ -332,18 +328,14 @@ def add_exploration_noise(config: AlphaZeroConfig, node: Node):
 class Player:
     # CENTER = 12
     # ANCHORS = [4, 16, 19]
-    POSSIBLE_ACTIONS = list(range(28))
 
     def play(self, az_quiz: az_quiz.AZQuiz):
-        action = None
-        exploration = False
+        config = AlphaZeroConfig()
+
+        action = run_mcts(config, az_quiz)
 
         while action is None or not az_quiz.valid(action):
-            if exploration:
-                action = np.random.randint(az_quiz.actions)
-            else:
-                action = run_mcts()
-
+            action = np.random.randint(az_quiz.actions)  # something failed - try to play
         return action
 
 

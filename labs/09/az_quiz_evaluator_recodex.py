@@ -11,7 +11,7 @@ class Player:
 
 def evaluate(player, games=50, randomized=False):
     # Will be implemented slightly differently in ReCodEx
-
+    to_play = 0
     players = [player, az_quiz_player_simple_heuristic.Player()]
     wins = [0, 0]
     for i in range(games):
