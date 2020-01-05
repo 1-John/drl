@@ -9,9 +9,9 @@ from typing import List
 class AlphaZeroConfig(object):
     def __init__(self):
         ### Self-Play
-        self.num_sampling_moves = 15  # 30
+        self.num_sampling_moves = 28  # 30
         self.max_moves = 28  # 512 for chess and shogi, 722 for Go.
-        self.num_simulations = 200  # 800
+        self.num_simulations = 500  # 800
 
         # Root prior exploration noise.
         self.root_dirichlet_alpha = 0.3  # for chess, 0.03 for Go and 0.15 for shogi.
@@ -249,7 +249,7 @@ def softmax_sample_index(z):
 
     #TODO result contains list of pst with indexes -sample from it
     while len(result) > 1 :
-        if (np.random.random() > 0.75):
+        if (np.random.random() > 0.3):
             result.pop(0)
             chosen_index = result[0][1]
         else:
@@ -289,7 +289,7 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
 
         while node.expanded():
             action, node = select_child(config, node)
-            scratch_game.apply(action)
+            # scratch_game.apply(action)
             search_path.append(node)
 
         value = evaluate(node, scratch_game, config.network)
@@ -327,6 +327,9 @@ def ucb_score(config: AlphaZeroConfig, parent: Node, child: Node):
     value_score = 1 - child.value()
     return prior_score + value_score
 
+def legal_actions(game):
+    legal = [a for a in range(0, game.actions) if game.valid(a)]
+    return legal
 
 # We use the neural network to obtain a value and policy prediction.
 def evaluate(node: Node, game: az_quiz, network: Network):
@@ -347,7 +350,7 @@ def evaluate(node: Node, game: az_quiz, network: Network):
 
     # Expand the node.
     node.to_play = game.to_play
-    for action in game.legal_actions():
+    for action in legal_actions(game):
         node.children[action] = Node(1/28) #TODO GET POLICY
     return 0.5
 
@@ -368,6 +371,9 @@ def add_exploration_noise(config: AlphaZeroConfig, node: Node):
     frac = config.root_exploration_fraction
     for a, n in zip(actions, noise):
         node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
+
+
+
 
 
 
