@@ -129,7 +129,7 @@ class Network:
         experimental_run_tf_function=False
         )
 
-        print(self.model.summary())
+        ###0###print(self.model.summary())
 
     def train(self, states, actions, returns):
         #games = state. return = revard of the state. actions - possible actions
@@ -231,9 +231,46 @@ def play_game(config: AlphaZeroConfig):
     return game
 
 
-def softmax_sample(x):
+def softmax_sample_index(z):
     """Compute softmax values for each sets of scores in x."""
-    return np.exp(x) / np.sum(np.exp(x), axis=0)
+
+    x = [z[0] for z in z]
+
+    # result = np.exp(x) / np.sum(np.exp(x), axis=0)
+    result = np.exp(x) / np.sum(np.exp(x))
+    result = [(val, idx) for idx, val in enumerate(result)]
+    # print(result)
+    chosen_index = max_arg(result)
+    # print(y)
+    result.sort(key= lambda x: -x[0])
+    # print (result)
+
+    # print(y)
+
+    #TODO result contains list of pst with indexes -sample from it
+    while len(result) > 1 :
+        if (np.random.random() > 0.75):
+            result.pop(0)
+            chosen_index = result[0][1]
+        else:
+            break
+
+    if len(result) == 1:
+        return result[0][1]
+
+    return chosen_index
+
+def max_arg(x):
+    max = -1
+    maxi = -1
+    for val,index in x:
+        # print(val, index, max, maxi)
+        if(val > max):
+            max = val
+            maxi = index
+
+    return maxi
+
 
 
 # Core Monte Carlo Tree Search algorithm.
@@ -256,25 +293,26 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
             search_path.append(node)
 
         value = evaluate(node, scratch_game, config.network)
-        backpropagate(search_path, value, scratch_game.to_play())
+        backpropagate(search_path, value, scratch_game.to_play)
 
     return select_action(config, game, root), root
 
 
 def select_action(config: AlphaZeroConfig, game: az_quiz, root: Node):
     visit_counts = [(child.visit_count, action)
-                    for action, child in root.children.iteritems()]
-    if game.history < config.num_sampling_moves:
-        _, action = softmax_sample(visit_counts)
+                    for action, child in root.children.items()]
+    if len(game.history) < config.num_sampling_moves:
+        ###0###print(visit_counts)
+        action = softmax_sample_index(visit_counts)
     else:
-        _, action = max(visit_counts)
+        _, action = max(visit_counts, key= lambda x: x[0])
     return action
 
 
 # Select the child with the highest UCB score.
 def select_child(config: AlphaZeroConfig, node: Node):
     _, action, child = max((ucb_score(config, node, child), action, child)
-                           for action, child in node.children.iteritems())
+                           for action, child in node.children.items())
     return action, child
 
 
@@ -292,16 +330,26 @@ def ucb_score(config: AlphaZeroConfig, parent: Node, child: Node):
 
 # We use the neural network to obtain a value and policy prediction.
 def evaluate(node: Node, game: az_quiz, network: Network):
-    value, policy_logits = network.GET_POLICY
+    # value, policy_logits = network.model.GET POLICY ## TODO GET POLICY
+    #
+    # legal_actions = game.legal_actions()
+    #
+    #
+    # # Expand the node.
+    # node.to_play = game.to_play()
+    # policy = {a: math.exp(policy_logits[a]) for a in legal_actions}
+    # policy_sum = sum(policy.itervalues())
+    # for action, p in policy.iteritems():
+    #     node.children[action] = Node(p / policy_sum)
+    # return value
+
 
 
     # Expand the node.
-    node.to_play = game.to_play()
-    policy = {a: math.exp(policy_logits[a]) for a in game.legal_actions()}
-    policy_sum = sum(policy.itervalues())
-    for action, p in policy.iteritems():
-        node.children[action] = Node(p / policy_sum)
-    return value
+    node.to_play = game.to_play
+    for action in game.legal_actions():
+        node.children[action] = Node(1/28) #TODO GET POLICY
+    return 0.5
 
 
 # At the end of a simulation, we propagate the evaluation all the way up the
@@ -332,7 +380,8 @@ class Player:
     def play(self, az_quiz: az_quiz.AZQuiz):
         config = AlphaZeroConfig()
 
-        action = run_mcts(config, az_quiz)
+        action, root = run_mcts(config, az_quiz)
+        ###0###print("action: ", action)
 
         while action is None or not az_quiz.valid(action):
             action = np.random.randint(az_quiz.actions)  # something failed - try to play
@@ -341,5 +390,4 @@ class Player:
 
 if __name__ == "__main__":
     import az_quiz_evaluator_recodex
-
     az_quiz_evaluator_recodex.evaluate(Player())
