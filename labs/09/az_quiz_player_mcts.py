@@ -4,13 +4,14 @@ import tensorflow as tf
 import math
 import az_quiz
 from typing import List
+from functools import reduce
 
 
 class AlphaZeroConfig(object):
     def __init__(self):
         ### Self-Play
-        self.num_sampling_moves = 28  # 30
-        self.max_moves = 28  # 512 for chess and shogi, 722 for Go.
+        self.num_sampling_moves = 8  # 30
+        self.max_moves = 500  # 512 for chess and shogi, 722 for Go.
         self.num_simulations = 500  # 800
 
         # Root prior exploration noise.
@@ -21,33 +22,18 @@ class AlphaZeroConfig(object):
         self.pb_c_base = 19652  # dle videa 15000
         self.pb_c_init = 1.25  # dle videa 2
 
-        ### Training
-        self.training_steps = int(700e3)
-        self.checkpoint_interval = int(1e3)
-        self.window_size = int(1e6)
-        self.batch_size = 4096
-
-        self.weight_decay = 1e-4
-        self.momentum = 0.9
-        # Schedule for chess and shogi, Go starts at 2e-2 immediately.
-        self.learning_rate_schedule = {
-            0: 2e-1,
-            100e3: 2e-2,
-            300e3: 2e-3,
-            500e3: 2e-4
-        }
         self.input_size = (29,)  # 28 fields + 1 for player
         self.learning_rate = 0.002
         self.hidden_layer_size = 1
         self.network = Network(self)
 
+        self.init_player = -1
 
 class Node(object):
-
-    def __init__(self, prior: float):
+    def __init__(self, prior: float = None):
         self.visit_count = 0
         self.to_play = -1
-        self.prior = 0.03571  # 1/28
+        self.prior = prior if prior is not None else 0.03571  # 1/28
         self.value_sum = 0  # "sum" of value function of the children
         self.children = {}
 
@@ -60,56 +46,6 @@ class Node(object):
         return self.value_sum / self.visit_count
 
 
-# class ReplayBuffer(object):
-#
-#     def __init__(self, config: AlphaZeroConfig):
-#         self.window_size = config.window_size
-#         self.batch_size = config.batch_size
-#         self.buffer = []
-#
-#     def save_game(self, game):
-#         if len(self.buffer) > self.window_size:
-#             self.buffer.pop(0)
-#         self.buffer.append(game)
-#
-#     def sample_batch(self):
-#         # Sample uniformly across positions.
-#         move_sum = float(sum(len(g.history) for g in self.buffer))
-#         games = np.random.choice(
-#             self.buffer,
-#             size=self.batch_size,
-#             p=[len(g.history) / move_sum for g in self.buffer])
-#         game_pos = [(g, np.random.randint(len(g.history))) for g in games]
-#         return [(g.make_image(i), g.make_target(i)) for (g, i) in game_pos]
-
-
-# class Network(object):
-#
-#     def inference(self, image):
-#         return (-1, {})  # Value, Policy
-#
-#     def get_weights(self):
-#         # Returns the weights of this network.
-#         return []
-
-#
-# class SharedStorage(object):
-#
-#     def __init__(self):
-#         self._networks = {}
-#
-#     def latest_network(self) -> Network:
-#         if self._networks:
-#             return self._networks[max(self._networks.iterkeys())]
-#         else:
-#             return make_uniform_network()  # policy -> uniform, value -> 0.5
-#
-#     def save_network(self, step: int, network: Network):
-#         self._networks[step] = network
-
-
-##################################
-####### Part 2: Training #########
 class Network:
     def __init__(self,  args):
         # Define suitable model. Apart from the model defined in `reinforce`,
@@ -136,7 +72,7 @@ class Network:
         # actions = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), actions)))
         # returns = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), returns)))
         # states = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), states)))
-        # np.array(list(reduce)) #TODO MUSI ZUSTAT
+        # np.array(list(reduce)) #TODO MUSIME TRENOVAT!
 
 
         # Train the model using the states, actions and observed returns.
@@ -157,6 +93,7 @@ class Network:
         return self.model.predict(states)
 
 
+##TRAINING CODE FROM ALPHA ZERO
 # def train_network(config: AlphaZeroConfig, storage: SharedStorage,
 #                   replay_buffer: ReplayBuffer):
 #   network = Network()
@@ -221,12 +158,13 @@ def run_selfplay(config: AlphaZeroConfig):#,
 # of the game is reached.
 def play_game(config: AlphaZeroConfig):
     game = az_quiz.AZQuiz()
-
-    while not game.winner and len(game.history) < config.max_moves:
+    moves = 0
+    while not game.winner and moves < config.max_moves:
+        moves += 1
       # while not game.winner and len(game.history) < config.max_moves:
         action, root = run_mcts(config, game)
 
-        game.apply(action)  # self.history.append(action)
+        # game.apply(action)  # self.history.append(action)
         # game.store_search_statistics(root)
     return game
 
@@ -249,7 +187,7 @@ def softmax_sample_index(z):
 
     #TODO result contains list of pst with indexes -sample from it
     while len(result) > 1 :
-        if (np.random.random() > 0.3):
+        if (np.random.random() > 0.8):
             result.pop(0)
             chosen_index = result[0][1]
         else:
@@ -279,8 +217,11 @@ def max_arg(x):
 # reach a leaf node.
 def run_mcts(config: AlphaZeroConfig, game: az_quiz):
     root = Node(0)
-    evaluate(root, game, config.network)
+    evaluate(root, game, config)
     add_exploration_noise(config, root)
+
+
+    runs = 0
 
     for _ in range(config.num_simulations):
         node = root
@@ -289,19 +230,19 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
 
         while node.expanded():
             action, node = select_child(config, node)
-            # scratch_game.apply(action)
+            runs += 1
             search_path.append(node)
 
-        value = evaluate(node, scratch_game, config.network)
+        value = evaluate(node, scratch_game, config)
         backpropagate(search_path, value, scratch_game.to_play)
 
-    return select_action(config, game, root), root
+    return select_action(config, game, root, runs ), root
 
 
-def select_action(config: AlphaZeroConfig, game: az_quiz, root: Node):
+def select_action(config: AlphaZeroConfig, game: az_quiz, root: Node, runs: int):
     visit_counts = [(child.visit_count, action)
                     for action, child in root.children.items()]
-    if len(game.history) < config.num_sampling_moves:
+    if runs < config.num_sampling_moves:
         ###0###print(visit_counts)
         action = softmax_sample_index(visit_counts)
     else:
@@ -332,7 +273,8 @@ def legal_actions(game):
     return legal
 
 # We use the neural network to obtain a value and policy prediction.
-def evaluate(node: Node, game: az_quiz, network: Network):
+def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig):
+    # network = config.network
     # value, policy_logits = network.model.GET POLICY ## TODO GET POLICY
     #
     # legal_actions = game.legal_actions()
@@ -350,10 +292,23 @@ def evaluate(node: Node, game: az_quiz, network: Network):
 
     # Expand the node.
     node.to_play = game.to_play
-    for action in legal_actions(game):
-        node.children[action] = Node(1/28) #TODO GET POLICY
-    return 0.5
+    legal_actionss = legal_actions(game)
+    for action in legal_actionss:
+        node.children[action] = Node(1/len(legal_actionss)) #TODO GET POLICY
+        g = game.clone()
+        g.move(action)
 
+        if g.winner != None:
+            leaf = node.children[action]
+            if g.winner == node.to_play:
+                leaf.value_sum = 1
+                leaf.prior = 1
+                # print("won")
+            else:
+                print("lost")
+                leaf.value_sum = -1
+                leaf.prior = -1
+    return node.value_sum
 
 # At the end of a simulation, we propagate the evaluation all the way up the
 # tree to the root.
@@ -373,23 +328,22 @@ def add_exploration_noise(config: AlphaZeroConfig, node: Node):
         node.children[a].prior = node.children[a].prior * (1 - frac) + n * frac
 
 
-
-
-
-
-
-
 class Player:
     # CENTER = 12
     # ANCHORS = [4, 16, 19]
 
     def play(self, az_quiz: az_quiz.AZQuiz):
+
         config = AlphaZeroConfig()
 
+        if (config.init_player == -1):
+            config.init_player = az_quiz.to_play
+
         action, root = run_mcts(config, az_quiz)
-        ###0###print("action: ", action)
+        # print("action from mcts: ", action)
 
         while action is None or not az_quiz.valid(action):
+            print("chosen another action")
             action = np.random.randint(az_quiz.actions)  # something failed - try to play
         return action
 
