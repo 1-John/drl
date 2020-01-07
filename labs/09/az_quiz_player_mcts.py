@@ -12,7 +12,7 @@ class AlphaZeroConfig(object):
         ### Self-Play
         self.num_sampling_moves = 0  # 30  # tells how many game moves will be possibly random
         self.max_moves = 30  # depth of the search 28 for az-kviz 512 for chess and shogi, 722 for Go.
-        self.num_simulations = 5000  # 800 number of paths in mcts
+        self.num_simulations = 500  # 800 number of paths in mcts
 
         # Root prior exploration noise.
         self.root_dirichlet_alpha = 0.03  # for chess, 0.03 for Go and 0.15 for shogi.
@@ -213,7 +213,7 @@ def max_arg(x):
 
 def print_children(node: Node):
     print(node.children.keys())
-    reduce(lambda x: x, [])
+    reduce(lambda x: x, [1])
 
 
 # Core Monte Carlo Tree Search algorithm.
@@ -221,11 +221,14 @@ def print_children(node: Node):
 # the search tree and traversing the tree according to the UCB formula until we
 # reach a leaf node.
 def run_mcts(config: AlphaZeroConfig, game: az_quiz):
+    player = game.to_play
+
     root = Node(0)
-    evaluate(root, game, config)
+    evaluate(root, game, config, player)
     add_exploration_noise(config, root)
 
-    print_children(root)
+    # print("run_mcts")
+    # print_children(root)
     runs = 0
 
     for _ in range(config.num_simulations):
@@ -243,38 +246,15 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
             search_path.append(node)
             # search_path_actions.append(action)
 
-        value = evaluate(node, scratch_game, config)
+        value = evaluate(node, scratch_game, config, player)
         # print(search_path_actions)
         # print_children(node)
-        backpropagate(search_path, value, scratch_game.to_play)
+        backpropagate(search_path, value, player)
 
-    return select_action(config, game, root, runs), root
-
-
-def run_mcts_backup(config: AlphaZeroConfig, game: az_quiz):
-    root = Node(0)
-    evaluate(root, game, config)
-    add_exploration_noise(config, root)
-
-    runs = 0
-
-    for _ in range(config.num_simulations):
-        node = root
-        scratch_game = game.clone()
-        search_path = [node]
-
-        while node.expanded():
-            action, node = select_child(config, node)
-            runs += 1
-            search_path.append(node)
-
-        value = evaluate(node, scratch_game, config)
-        backpropagate(search_path, value, scratch_game.to_play)
-
-    return select_action(config, game, root, runs), root
+    return select_action(config, root, runs), root
 
 
-def select_action(config: AlphaZeroConfig, game: az_quiz, root: Node, runs: int):
+def select_action(config: AlphaZeroConfig, root: Node, runs: int):
     visit_counts = [(child.visit_count, action)
                     for action, child in root.children.items()]
     if runs < config.num_sampling_moves:
@@ -289,7 +269,7 @@ def select_action(config: AlphaZeroConfig, game: az_quiz, root: Node, runs: int)
 def random_child(config: AlphaZeroConfig, node: Node):
     triples = [(ucb_score(config, node, child), action, child) for action, child in node.children.items()]
 
-    index = np.random.choice(len(triples))[0]
+    index = np.random.choice(len(triples))
     _, action, child = triples[index]
     return action, child
 
@@ -342,7 +322,7 @@ def legal_actions(game):
 
 
 # We use the neural network to obtain a value and policy prediction.
-def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig):
+def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
     # network = config.network
     # value, policy_logits = network.model.GET POLICY ## TODO GET POLICY
     #
@@ -360,18 +340,22 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig):
     # Expand the node.
     node.to_play = game.to_play
     legal_actionss = legal_actions(game)
+    value = 0.5
     for action in legal_actionss:
         node.children[action] = Node(1 / len(legal_actionss))  # TODO GET POLICY
         g = game.clone()
         g.move(action)
 
-        if g.winner != None:
+        if g.winner is not None:
             leaf = node.children[action]
-            if g.winner == node.to_play:
+            if g.winner == player:
                 leaf.value_sum = 1
-                leaf.prior = 1
-    node.value_sum = sum(node.children)
-    return node.value_sum
+                value = 1
+            else:
+                leaf.value_sum = -1
+                value = -1
+
+    return value
 
 
 # At the end of a simulation, we propagate the evaluation all the way up the
@@ -395,19 +379,21 @@ def add_exploration_noise(config: AlphaZeroConfig, node: Node):
 class Player:
     # CENTER = 12
     # ANCHORS = [4, 16, 19]
+    config = None
+    init_player = -1
 
     def play(self, az_quiz: az_quiz.AZQuiz):
-        config = AlphaZeroConfig()
+        if self.init_player == -1:
+            self.config = AlphaZeroConfig()
+            self.init_player = az_quiz.to_play
+            print("Player nr:", self.init_player)
 
-        if (config.init_player == -1):
-            config.init_player = az_quiz.to_play
-
-        for action in [27] + list(range(10)):
+        for action in [27] + list(range(20)):
             if az_quiz.valid(action):
                 return action
 
-        action, root = run_mcts(config, az_quiz)
-        # print("action from mcts: ", action)
+        action, root = run_mcts(self.config, az_quiz)
+        print("action from mcts: ", action)
 
         while action is None or not az_quiz.valid(action):
             print("chosen another action")
@@ -418,4 +404,16 @@ class Player:
 if __name__ == "__main__":
     import az_quiz_evaluator_recodex
 
-    az_quiz_evaluator_recodex.evaluate(Player())
+    if False:
+        az_quiz_evaluator_recodex.evaluate(Player())
+        exit()
+
+    import az_quiz_evaluator
+    import importlib
+
+    deterministic = importlib.import_module("az_quiz_player_deterministic").Player()
+    # az_quiz_evaluator.evaluate([Player(), deterministic], 2, False, True)
+    players = [Player(), deterministic]
+    az_quiz_evaluator.evaluate(players, 10, False, False)
+    players = [Player(), deterministic][-1::-1]
+    az_quiz_evaluator.evaluate(players, 10, False, False)
