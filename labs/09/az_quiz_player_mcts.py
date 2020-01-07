@@ -10,12 +10,12 @@ from functools import reduce
 class AlphaZeroConfig(object):
     def __init__(self):
         ### Self-Play
-        self.num_sampling_moves = 8  # 30
-        self.max_moves = 500  # 512 for chess and shogi, 722 for Go.
-        self.num_simulations = 500  # 800
+        self.num_sampling_moves = 0  # 30  # tells how many game moves will be possibly random
+        self.max_moves = 30  # depth of the search 28 for az-kviz 512 for chess and shogi, 722 for Go.
+        self.num_simulations = 5000  # 800 number of paths in mcts
 
         # Root prior exploration noise.
-        self.root_dirichlet_alpha = 0.3  # for chess, 0.03 for Go and 0.15 for shogi.
+        self.root_dirichlet_alpha = 0.03  # for chess, 0.03 for Go and 0.15 for shogi.
         self.root_exploration_fraction = 0.25
 
         # UCB formula
@@ -25,9 +25,10 @@ class AlphaZeroConfig(object):
         self.input_size = (29,)  # 28 fields + 1 for player
         self.learning_rate = 0.002
         self.hidden_layer_size = 1
-        self.network = Network(self)
+        # self.network = Network(self)
 
         self.init_player = -1
+
 
 class Node(object):
     def __init__(self, prior: float = None):
@@ -47,7 +48,7 @@ class Node(object):
 
 
 class Network:
-    def __init__(self,  args):
+    def __init__(self, args):
         # Define suitable model. Apart from the model defined in `reinforce`,
         # define also another model `baseline`, which produces one output
         # (using a dense layer without activation).
@@ -56,24 +57,23 @@ class Network:
         actions = 28
         input_layer = tf.keras.layers.Input(shape=args.input_size)
         hidden_layer = tf.keras.layers.Dense(args.hidden_layer_size, activation='relu')(input_layer)
-        output_layer = tf.keras.layers.Dense(actions,)(hidden_layer)
+        output_layer = tf.keras.layers.Dense(actions, )(hidden_layer)
         self.model = tf.keras.Model(inputs=[input_layer], outputs=[output_layer])
 
         self.model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate),
-        loss=tf.keras.losses.SparseCategoricalCrossentropy(),
-        experimental_run_tf_function=False
+            optimizer=tf.keras.optimizers.Adam(learning_rate=args.learning_rate),
+            loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+            experimental_run_tf_function=False
         )
 
         ###0###print(self.model.summary())
 
     def train(self, states, actions, returns):
-        #games = state. return = revard of the state. actions - possible actions
+        # games = state. return = revard of the state. actions - possible actions
         # actions = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), actions)))
         # returns = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), returns)))
         # states = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), states)))
         # np.array(list(reduce)) #TODO MUSIME TRENOVAT!
-
 
         # Train the model using the states, actions and observed returns.
         # You should:
@@ -136,32 +136,32 @@ def alphazero(config: AlphaZeroConfig):
     # storage = SharedStorage()
     # replay_buffer = ReplayBuffer(config)
 
-    run_selfplay(config)#, storage, replay_buffer)
+    run_selfplay(config)  # , storage, replay_buffer)
     # train_network(config)#, storage, replay_buffer)
 
-    return #storage.latest_network()
+    return  # storage.latest_network()
 
 
 # takes the latest network snapshot, produces a game and makes it available
 # to the training job by writing it to a shared replay buffer.
-def run_selfplay(config: AlphaZeroConfig):#,
-                 #storage: SharedStorage,
-                 #replay_buffer: ReplayBuffer):
+def run_selfplay(config: AlphaZeroConfig):  # ,
+    # storage: SharedStorage,
+    # replay_buffer: ReplayBuffer):
     while True:
         # network = storage.latest_network())
-        game = play_game(config, config.network)
-        #replay_buffer.save_game(game)
+        game = play_game(config)
+        # replay_buffer.save_game(game)
 
 
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
 # of the game is reached.
 def play_game(config: AlphaZeroConfig):
-    game = az_quiz.AZQuiz()
+    game = az_quiz.AZQuiz(randomized=False)
     moves = 0
     while not game.winner and moves < config.max_moves:
         moves += 1
-      # while not game.winner and len(game.history) < config.max_moves:
+        # while not game.winner and len(game.history) < config.max_moves:
         action, root = run_mcts(config, game)
 
         # game.apply(action)  # self.history.append(action)
@@ -180,13 +180,13 @@ def softmax_sample_index(z):
     # print(result)
     chosen_index = max_arg(result)
     # print(y)
-    result.sort(key= lambda x: -x[0])
+    result.sort(key=lambda x: -x[0])
     # print (result)
 
     # print(y)
 
-    #TODO result contains list of pst with indexes -sample from it
-    while len(result) > 1 :
+    # TODO result contains list of pst with indexes -sample from it
+    while len(result) > 1:
         if (np.random.random() > 0.8):
             result.pop(0)
             chosen_index = result[0][1]
@@ -198,17 +198,22 @@ def softmax_sample_index(z):
 
     return chosen_index
 
+
 def max_arg(x):
     max = -1
     maxi = -1
-    for val,index in x:
+    for val, index in x:
         # print(val, index, max, maxi)
-        if(val > max):
+        if (val > max):
             max = val
             maxi = index
 
     return maxi
 
+
+def print_children(node: Node):
+    print(node.children.keys())
+    reduce(lambda x: x, [])
 
 
 # Core Monte Carlo Tree Search algorithm.
@@ -220,6 +225,36 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
     evaluate(root, game, config)
     add_exploration_noise(config, root)
 
+    print_children(root)
+    runs = 0
+
+    for _ in range(config.num_simulations):
+        node = root
+        scratch_game = game.clone()
+        search_path = [node]
+        # search_path_actions = []
+
+        # print("\nnew path")
+        while node.expanded():
+            action, node = sample_random_child(config, node)
+            scratch_game.move(action)
+
+            runs += 1
+            search_path.append(node)
+            # search_path_actions.append(action)
+
+        value = evaluate(node, scratch_game, config)
+        # print(search_path_actions)
+        # print_children(node)
+        backpropagate(search_path, value, scratch_game.to_play)
+
+    return select_action(config, game, root, runs), root
+
+
+def run_mcts_backup(config: AlphaZeroConfig, game: az_quiz):
+    root = Node(0)
+    evaluate(root, game, config)
+    add_exploration_noise(config, root)
 
     runs = 0
 
@@ -236,18 +271,50 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
         value = evaluate(node, scratch_game, config)
         backpropagate(search_path, value, scratch_game.to_play)
 
-    return select_action(config, game, root, runs ), root
+    return select_action(config, game, root, runs), root
 
 
 def select_action(config: AlphaZeroConfig, game: az_quiz, root: Node, runs: int):
     visit_counts = [(child.visit_count, action)
                     for action, child in root.children.items()]
     if runs < config.num_sampling_moves:
-        ###0###print(visit_counts)
+        print(visit_counts)
         action = softmax_sample_index(visit_counts)
     else:
-        _, action = max(visit_counts, key= lambda x: x[0])
+        _, action = max(visit_counts, key=lambda x: x[0])
     return action
+
+
+# Sample the child with probability according to the UCB score.
+def random_child(config: AlphaZeroConfig, node: Node):
+    triples = [(ucb_score(config, node, child), action, child) for action, child in node.children.items()]
+
+    index = np.random.choice(len(triples))[0]
+    _, action, child = triples[index]
+    return action, child
+
+
+# Sample the child with probability according to the UCB score.
+def sample_random_child(config: AlphaZeroConfig, node: Node):
+    triples = [(ucb_score(config, node, child), action, child) for action, child in node.children.items()]
+
+    triples_scores = [score if score > 0 else 0 for score, action, child in triples]
+    triples_scores_sum = sum(triples_scores)
+
+    if triples_scores_sum == 0:
+        index = np.random.choice(len(triples))
+        _, action, child = triples[index]
+        return action, child
+
+    triples_probability = list(map(lambda x: 0 if x < 0 else x / triples_scores_sum, triples_scores))
+
+    # three = np.random.choice(triples, 1, p=triples_probability)
+
+    indexes = list(range(len(triples)))
+    index = np.random.choice(indexes, 1, p=triples_probability)[0]
+    _, action, child = triples[index]
+
+    return action, child
 
 
 # Select the child with the highest UCB score.
@@ -268,9 +335,11 @@ def ucb_score(config: AlphaZeroConfig, parent: Node, child: Node):
     value_score = 1 - child.value()
     return prior_score + value_score
 
+
 def legal_actions(game):
     legal = [a for a in range(0, game.actions) if game.valid(a)]
     return legal
+
 
 # We use the neural network to obtain a value and policy prediction.
 def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig):
@@ -288,13 +357,11 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig):
     #     node.children[action] = Node(p / policy_sum)
     # return value
 
-
-
     # Expand the node.
     node.to_play = game.to_play
     legal_actionss = legal_actions(game)
     for action in legal_actionss:
-        node.children[action] = Node(1/len(legal_actionss)) #TODO GET POLICY
+        node.children[action] = Node(1 / len(legal_actionss))  # TODO GET POLICY
         g = game.clone()
         g.move(action)
 
@@ -303,12 +370,9 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig):
             if g.winner == node.to_play:
                 leaf.value_sum = 1
                 leaf.prior = 1
-                # print("won")
-            else:
-                print("lost")
-                leaf.value_sum = -1
-                leaf.prior = -1
+    node.value_sum = sum(node.children)
     return node.value_sum
+
 
 # At the end of a simulation, we propagate the evaluation all the way up the
 # tree to the root.
@@ -333,11 +397,14 @@ class Player:
     # ANCHORS = [4, 16, 19]
 
     def play(self, az_quiz: az_quiz.AZQuiz):
-
         config = AlphaZeroConfig()
 
         if (config.init_player == -1):
             config.init_player = az_quiz.to_play
+
+        for action in [27] + list(range(10)):
+            if az_quiz.valid(action):
+                return action
 
         action, root = run_mcts(config, az_quiz)
         # print("action from mcts: ", action)
@@ -350,4 +417,5 @@ class Player:
 
 if __name__ == "__main__":
     import az_quiz_evaluator_recodex
+
     az_quiz_evaluator_recodex.evaluate(Player())

@@ -6,7 +6,7 @@ class AZQuiz:
     N = 7
     C = 4
 
-    def __init__(self, randomized, history=None):
+    def __init__(self, randomized):#, history=None):
         self._board = np.zeros([self.N, self.N], dtype=np.uint8)
         self._randomized = randomized
         self._to_play = 0
