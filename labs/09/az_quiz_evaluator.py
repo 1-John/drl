@@ -11,20 +11,22 @@ class Player:
 def evaluate(players, games, randomized, render):
     wins = [0, 0]
     for i in range(games):
+        print("new_game:", i)
         for to_start in range(2):
+            print("starting range:", to_start)
             game = az_quiz.AZQuiz(randomized)
             try:
                 while game.winner is None:
                     game.move(players[to_start ^ game.to_play].play(game.clone()))
                     if render:
                         game.render()
-                        time.sleep(0.3)
+                        #time.sleep(0.3)
             except ValueError:
                 pass
             if game.winner == to_start:
                 wins[to_start] += 1
             if render:
-                time.sleep(1.0)
+                time.sleep(2.90)
 
         print("First player win rate after {} games: {:.2f}% ({:.2f}% and {:.2f}% when starting and not starting)".format(
             2 * i + 2, 100 * (wins[0] + wins[1]) / (2 * i + 2), 100 * wins[0] / (i + 1), 100 * wins[1] / (i + 1)), file=sys.stderr)
