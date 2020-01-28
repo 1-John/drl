@@ -27,6 +27,7 @@ class AlphaZeroConfig(object):
         self.network = Network(self)
 
         self.init_player = -1
+        self.games_per_training = 20 # nr of games for each training
 
 
 class Node(object):
@@ -41,6 +42,7 @@ class Node(object):
         return len(self.children) > 0
 
     def value(self):
+        # print("node child", self.value_sum, self.visit_count) $TODO
         if self.visit_count == 0:
             return 0
         return self.value_sum / self.visit_count
@@ -83,11 +85,18 @@ class Network:
         self.model.train_on_batch(states, actions, sample_weight=weight)
 
 
-    def predict(self, states):
-        states = np.array(states, np.float32)
+    def predict(self, states_in):
+
+        states = np.array([states_in])
+
         result = self.model.predict(states)
         #first actions, then quality
-        return result[:-1], result[-1]
+
+
+        # print(result[0]) # [[-0.0
+        # print(result[0:1]) # [array([[-0.
+
+        return result[0:1], result[1][0][0]  # it is double array of one value [[v]]
 
 
 ##TRAINING CODE FROM ALPHA ZERO
@@ -124,17 +133,30 @@ def update_weights(optimizer: tf.optimizers, network: Network, batch, weight_dec
 # from the training to the self-play, and the finished games from the self-play
 # to the training.
 def alphazero(config: AlphaZeroConfig):
+    network = config.network
 
     #TODO while enough time OR not sufficient quality do [selfplay (even multiple for batch) -> train cycle]
 
-    saved = []     # je pole trojice (state, target_policy, target_value) # TODO create this 3-tuple
+    histories = []
+    for i in range(config.games_per_training):
+        history = play_game(config)
 
-    for i in range(20):
-        game, history = play_game(config) #TODO save history
-        saved.append(game)
+        network.predict(history)
 
-    train_network(config, saved)
+        histories.append(history)
 
+    #history :- game, state, action
+    #saved :- state, policy, value
+
+    #state - mam
+    #policy - je to action?
+    #value
+
+
+
+    train_network(config, saved)  #saved je pole -> trojice (state, target_policy, target_value) # TODO create this 3-tuple
+
+    #vraci
     #TODO when finished - save network so we can load it in recodex and not train
     return
 
@@ -150,8 +172,8 @@ def play_game(config: AlphaZeroConfig):
         moves += 1
         action, root = run_mcts(config, game)
 
-        history.append((game.clone(), action)) #TODO store something
-    return game, history
+        history.append(game.clone(), (game2array(game), action))
+    return history
 
 
 def softmax_sample_index(z):
@@ -212,6 +234,7 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
     evaluate(root, game, config, player)
     add_exploration_noise(config, root)
 
+
     # print("run_mcts")
     # print_children(root)
     runs = 0
@@ -264,7 +287,7 @@ def select_action(config: AlphaZeroConfig, root: Node, runs: int):
     visit_counts = [(child.visit_count, action)
                     for action, child in root.children.items()]
     if runs < config.num_sampling_moves:
-        print(visit_counts)
+        print("visit_counts", visit_counts)
         action = softmax_sample_index(visit_counts)
     else:
         _, action = max(visit_counts, key=lambda x: x[0])
@@ -294,9 +317,11 @@ def sample_random_child(config: AlphaZeroConfig, node: Node):
 
     triples_probability = list(map(lambda x: 0 if x < 0 else x / triples_scores_sum, triples_scores))
 
-    # three = np.random.choice(triples, 1, p=triples_probability)
-
     indexes = list(range(len(triples)))
+
+    for a, ch in node.children.items():
+        score = ucb_score(config, node, ch)
+
     index = np.random.choice(indexes, 1, p=triples_probability)[0]
     _, action, child = triples[index]
 
@@ -318,7 +343,18 @@ def ucb_score(config: AlphaZeroConfig, parent: Node, child: Node):
     pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
 
     prior_score = pb_c * child.prior
-    value_score = 1 - child.value()
+
+    childVALUE = child.value()
+    # print("ucb_score child: ", childVALUE) $TODO
+    if not isinstance(childVALUE, (float, int)):
+
+        print("is array")
+        print(childVALUE[0])
+        print(childVALUE[0][0])
+        childVALUE = childVALUE[0][0] #TODO this is hotfix
+
+    value_score = 1 - childVALUE
+
     return prior_score + value_score
 
 
@@ -338,7 +374,8 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
         addition = -1
         if node.value_sum > 0:
             addition = 1
-        node.value_sum += add_exploration_noise()
+        node.value_sum += add_exploration_noise() #TODO this can't work
+
 
         # return node.value() # value sum / visit count
 
@@ -347,12 +384,22 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
 
     network = config.network
 
-    policy_logits, value = network.model.predict()
+    gamestate = game2array(game)
+
+    policy_logits, value = network.predict(gamestate)
+    if not (isinstance(value, (np.float32, float))):
+        print ("Ha - value from network evaluation", value)
+        print (type(value))
+
+    policy_logits = policy_logits[0][0]
 
     # Expand the node.
     policy = {a: math.exp(policy_logits[a]) for a in legal_actions(game)}
-    policy_sum = sum(policy.itervalues())
-    for action, p in policy.iteritems():
+    policy_sum = sum(policy.values())
+    if not (isinstance(policy_sum, float)):
+        print("problem", value)
+        raise
+    for action, p in policy.items():
         node.children[action] = Node(p / policy_sum)
     return value
 
@@ -382,6 +429,38 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
     # #     print("result is", value, flush=True)
     #
     # return value
+
+_REPRESENTATION = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [1, 0, 0, 1], [0, 1, 0, 1]], dtype=np.bool)
+_ACTION_Y = np.array([0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6],
+                     dtype=np.int8)
+_ACTION_X = np.array([0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6],
+                     dtype=np.int8)
+def game2array(az_quiz : az_quiz.AZQuiz):
+
+    board = az_quiz.board
+    board28 = []
+    for i in range(28):
+        x = _ACTION_X[i]
+        y = _ACTION_Y[i]
+
+        found = False
+        for j in range(4):
+            differ = False
+            for k in range(4):
+                if _REPRESENTATION[j][k] != board[y, x][k]:
+                    differ = True
+                    break
+
+            if not differ:
+                found = True
+                board28.append(j)
+                break
+
+    # print(board28)
+    # print(az_quiz.to_play)
+    board28.append(az_quiz.to_play)
+    return board28
+
 
 
 def print_game_situation(self):
@@ -435,36 +514,6 @@ class Player:
     config = None
     init_player = -1
 
-    def game2array(self, az_quiz : az_quiz.AZQuiz):
-        _REPRESENTATION = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [1, 0, 0, 1], [0, 1, 0, 1]], dtype=np.bool)
-        _ACTION_X = np.array([0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6],
-                             dtype=np.int8)
-        _ACTION_Y = np.array([0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6],
-                             dtype=np.int8)
-
-        board = az_quiz.board
-        board28 = []
-        for i in range(28):
-            x = _ACTION_X[i]
-            y = _ACTION_Y[i]
-
-            found = False
-            for j in range(4):
-                differ = False
-                for k in range(4):
-                    if _REPRESENTATION[j][k] != board[y, x][k]:
-                        differ = True
-                        break
-
-                if not differ:
-                    found = True
-                    board28.append(j)
-                    break
-
-        # print(board28)
-        # print(az_quiz.to_play)
-        board28.append(az_quiz.to_play)
-
     def play(self, az_quiz: az_quiz.AZQuiz):
         if self.init_player == -1:
             self.config = AlphaZeroConfig()
@@ -477,10 +526,7 @@ class Player:
 
         # time.sleep(0.3)
 
-        print("thereb ")
-        self.game2array(az_quiz)
-        action =1
-        # action, root = run_mcts(self.config, az_quiz) TODO uncomment
+        action, root = run_mcts(self.config, az_quiz)
         print("action from mcts: ", action)
 
         while action is None or not az_quiz.valid(action):

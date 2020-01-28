@@ -22,6 +22,7 @@ def evaluate(players, games, randomized, render):
                         game.render()
                         #time.sleep(0.3)
             except ValueError:
+                raise
                 pass
             if game.winner == to_start:
                 wins[to_start] += 1
