@@ -363,20 +363,10 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
             config.already_reached_end = True
         print("+" if node.value_sum > 0 else "-", end="")
 
-        # print_game_situation(game)
-        return node.value_sum # TODO possible bug - may need to update the sum (due to the count value goes in limits to 0)
-        # TODO if bug -> section under would be the fix for the bug
-        addition = -1
-        if node.value_sum > 0:
-            addition = 1
-        node.value_sum += add_exploration_noise() #TODO this can't work
-
-
-        # return node.value() # value sum / visit count
-
+        return node.value_sum # TODO possible bug - we may need to update the sum (due to the count value goes in limits to 0)
+        # node.value_sum += 1 if node.value_sum > 0 else 0 # TODO uncomment if bug
 
     node.to_play = game.to_play
-
     network = config.network
 
     gamestate = game2array(game)
