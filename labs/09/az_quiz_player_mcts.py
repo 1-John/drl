@@ -29,6 +29,8 @@ class AlphaZeroConfig(object):
         self.init_player = -1
         self.games_per_training = 20 # nr of games for each training
 
+        self.already_reached_end = False
+
 
 class Node(object):
     def __init__(self, prior: float = None):
@@ -42,7 +44,6 @@ class Node(object):
         return len(self.children) > 0
 
     def value(self):
-        # print("node child", self.value_sum, self.visit_count) $TODO
         if self.visit_count == 0:
             return 0
         return self.value_sum / self.visit_count
@@ -343,17 +344,7 @@ def ucb_score(config: AlphaZeroConfig, parent: Node, child: Node):
     pb_c *= math.sqrt(parent.visit_count) / (child.visit_count + 1)
 
     prior_score = pb_c * child.prior
-
-    childVALUE = child.value()
-    # print("ucb_score child: ", childVALUE) $TODO
-    if not isinstance(childVALUE, (float, int)):
-
-        print("is array")
-        print(childVALUE[0])
-        print(childVALUE[0][0])
-        childVALUE = childVALUE[0][0] #TODO this is hotfix
-
-    value_score = 1 - childVALUE
+    value_score = 1 - child.value()
 
     return prior_score + value_score
 
@@ -367,7 +358,11 @@ def legal_actions(game):
 def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
     #don't expand finished game
     if game.winner is not None:
-        print("visit of a known one :", node.value_sum)
+        if not config.already_reached_end:
+            print("final node reached won?: [+ winning node, - loosing node]")
+            config.already_reached_end = True
+        print("+" if node.value_sum > 0 else "-", end="")
+
         # print_game_situation(game)
         return node.value_sum # TODO possible bug - may need to update the sum (due to the count value goes in limits to 0)
         # TODO if bug -> section under would be the fix for the bug
@@ -525,7 +520,6 @@ class Player:
         #         return action
 
         # time.sleep(0.3)
-
         action, root = run_mcts(self.config, az_quiz)
         print("action from mcts: ", action)
 
