@@ -6,6 +6,7 @@ import az_quiz
 from typing import List
 from functools import reduce
 import time
+import os
 
 
 class AlphaZeroConfig(object):
@@ -85,20 +86,43 @@ class Network:
         weight = returns  # - baselines (if there is baseline available)
         self.model.train_on_batch(states, actions, sample_weight=weight)
 
-
     def predict(self, states_in):
-
         states = np.array([states_in])
 
         result = self.model.predict(states)
         #first actions, then quality
 
-
-        # print(result[0]) # [[-0.0
-        # print(result[0:1]) # [array([[-0.
-
         return result[0:1], result[1][0][0]  # it is double array of one value [[v]]
 
+    @staticmethod
+    def file_location():
+        return os.path.realpath(__file__) + "_trained_network.txt"
+
+    def save_network(self, number = 0):
+        filepath = self.file_location()
+        f = open(filepath, 'a')
+        f.write(time.localtime())
+        if number != 0:
+            f.write('saved at step: ' + str(number))
+        f.write('\n')
+        f.write(self.model.get_weights())
+        f.write('\n')
+        f.close()
+
+    def load_latest_network(self):
+        filepath = self.file_location()
+        line = ""
+        with open(filepath, 'rU') as f:
+            for l in f:
+                print(l)
+                line = l
+
+        weights = self.parse_weights(line)
+        self.model.set_weights(weights)
+
+    @staticmethod
+    def parse_weights(line):
+        return [0]*28  # todo parse the line
 
 ##TRAINING CODE FROM ALPHA ZERO
 def train_network(config: AlphaZeroConfig, batch):
@@ -128,37 +152,43 @@ def update_weights(optimizer: tf.optimizers, network: Network, batch, weight_dec
 # ##################################
 
 
-# AlphaZero training is split into two independent parts: Network training and
-# self-play data generation.
-# These two parts only communicate by transferring the latest network checkpoint
-# from the training to the self-play, and the finished games from the self-play
-# to the training.
+# AlphaZero training is split into two independent parts: Network training and self-play data generation.
 def alphazero(config: AlphaZeroConfig):
     network = config.network
 
-    #TODO while enough time OR not sufficient quality do [selfplay (even multiple for batch) -> train cycle]
+    i = 0
+    save_at_step = 1
+    histories = []  # game simulation takes a long time - so remember everything and train over and over on past games
 
-    histories = []
-    for i in range(config.games_per_training):
-        history = play_game(config)
+    while True and i < 20:#10_000_000:
+        i+=1
+        #TODO while enough time OR not sufficient quality do [selfplay (even multiple for batch) -> train cycle]
+        for i in range(config.games_per_training):
+            history = play_game(config)
 
-        network.predict(history)
-
-        histories.append(history)
-
-    #history :- game, state, action
-    #saved :- state, policy, value
-
-    #state - mam
-    #policy - je to action?
-    #value
+            network.predict(history)
+            histories.append(history)
 
 
+        #history :- game, state, action     //   game.clone(), game2array(game), action
 
-    train_network(config, saved)  #saved je pole -> trojice (state, target_policy, target_value) # TODO create this 3-tuple
+        #saved :- state, policy, value
 
-    #vraci
-    #TODO when finished - save network so we can load it in recodex and not train
+        #state - DONE
+        #policy - je to action? nn -- je to output values??? tzn 28 length?
+        #value -
+
+        if i > save_at_step:
+            network.save_network(save_at_step)
+            save_at_step *= 2
+
+        train_network(config, saved)  #saved je pole -> trojic (state, target_policy, target_value) # TODO create this 3-tuple
+
+        #vraci
+        #TODO when finished - save network so we can load it in recodex and not train
+    network.save_network()
+
+
     return
 
 
@@ -360,6 +390,8 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
     if game.winner is not None:
         if not config.already_reached_end:
             print("final node reached won?: [+ winning node, - loosing node]")
+            print(os.path.realpath(__file__))
+            print(time.localtime())
             config.already_reached_end = True
         print("+" if node.value_sum > 0 else "-", end="")
 
@@ -373,8 +405,8 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
 
     policy_logits, value = network.predict(gamestate)
     if not (isinstance(value, (np.float32, float))):
-        print ("Ha - value from network evaluation", value)
-        print (type(value))
+        print("Ha - value from network evaluation", value)
+        print(type(value))
 
     policy_logits = policy_logits[0][0]
 
