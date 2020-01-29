@@ -28,7 +28,7 @@ class AlphaZeroConfig(object):
         self.network = Network(self)
 
         self.init_player = -1
-        self.games_per_training = 20 # nr of games for each training
+        self.games_per_training = 20  # nr of games for each training
 
         self.already_reached_end = False
 
@@ -90,7 +90,7 @@ class Network:
         states = np.array([states_in])
 
         result = self.model.predict(states)
-        #first actions, then quality
+        # first actions, then quality
 
         return result[0:1], result[1][0][0]  # it is double array of one value [[v]]
 
@@ -98,7 +98,7 @@ class Network:
     def file_location():
         return os.path.realpath(__file__) + "_trained_network.txt"
 
-    def save_network(self, number = 0):
+    def save_network(self, number=0):
         filepath = self.file_location()
         f = open(filepath, 'a')
         f.write(time.localtime())
@@ -122,30 +122,31 @@ class Network:
 
     @staticmethod
     def parse_weights(line):
-        return [0]*28  # todo parse the line
+        return [0] * 28  # todo parse the line
+
 
 ##TRAINING CODE FROM ALPHA ZERO
 def train_network(config: AlphaZeroConfig, batch):
-  network = config.network
-  optimizer = tf.train.MomentumOptimizer(config.learning_rate_schedule,
-                                         config.momentum)
-  for i in range(config.training_steps):
-    update_weights(optimizer, network, batch, config.weight_decay)
+    network = config.network
+    optimizer = tf.train.MomentumOptimizer(config.learning_rate_schedule,
+                                           config.momentum)
+    for i in range(config.training_steps):
+        update_weights(optimizer, network, batch, config.weight_decay)
 
 
 def update_weights(optimizer: tf.optimizers, network: Network, batch, weight_decay: float):
-  loss = 0
-  for (state, target_policy, target_value) in batch:
-    policy_logits, value = network.predict(state)
-    loss += (
-        tf.losses.mean_squared_error(value, target_value) +
-        tf.nn.softmax_cross_entropy_with_logits(
-            logits=policy_logits, labels=target_policy))
+    loss = 0
+    for (state, target_policy, target_value) in batch:
+        policy_logits, value = network.predict(state)
+        loss += (
+                tf.losses.mean_squared_error(value, target_value) +
+                tf.nn.softmax_cross_entropy_with_logits(
+                    logits=policy_logits, labels=target_policy))
 
-  for weights in network.get_weights():
-    loss += weight_decay * tf.nn.l2_loss(weights)
+    for weights in network.get_weights():
+        loss += weight_decay * tf.nn.l2_loss(weights)
 
-  optimizer.minimize(loss)
+    optimizer.minimize(loss)
 
 
 # ######### End Training ###########
@@ -160,34 +161,33 @@ def alphazero(config: AlphaZeroConfig):
     save_at_step = 1
     histories = []  # game simulation takes a long time - so remember everything and train over and over on past games
 
-    while True and i < 20:#10_000_000:
-        i+=1
-        #TODO while enough time OR not sufficient quality do [selfplay (even multiple for batch) -> train cycle]
+    while True and i < 20:  # 10_000_000:
+        i += 1
+        # TODO while enough time OR not sufficient quality do [selfplay (even multiple for batch) -> train cycle]
         for i in range(config.games_per_training):
             history = play_game(config)
 
             network.predict(history)
             histories.append(history)
 
+        # history :- game, state, action     //   game.clone(), game2array(game), action
 
-        #history :- game, state, action     //   game.clone(), game2array(game), action
+        # saved :- state, policy, value
 
-        #saved :- state, policy, value
-
-        #state - DONE
-        #policy - je to action? nn -- je to output values??? tzn 28 length?
-        #value -
+        # state - DONE
+        # policy - je to action? nn -- je to output values??? tzn 28 length?
+        # value -
 
         if i > save_at_step:
             network.save_network(save_at_step)
             save_at_step *= 2
 
-        train_network(config, saved)  #saved je pole -> trojic (state, target_policy, target_value) # TODO create this 3-tuple
+        train_network(config,
+                      saved)  # saved je pole -> trojic (state, target_policy, target_value) # TODO create this 3-tuple
 
-        #vraci
-        #TODO when finished - save network so we can load it in recodex and not train
+        # vraci
+        # TODO when finished - save network so we can load it in recodex and not train
     network.save_network()
-
 
     return
 
@@ -265,7 +265,6 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
     evaluate(root, game, config, player)
     add_exploration_noise(config, root)
 
-
     # print("run_mcts")
     # print_children(root)
     runs = 0
@@ -297,11 +296,12 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
 
 def print_mstc_node_info(node: Node, action, spaces):
     # print(spaces)
-    print(spaces*" " + str(action) + ":-> val:" + str(node.value()) + ":sum=" + str(node.value_sum) + "visits:" + str(node.visit_count))
+    print(spaces * " " + str(action) + ":-> val:" + str(node.value()) + ":sum=" + str(node.value_sum) + "visits:" + str(
+        node.visit_count))
 
 
-def print_mstc_tree(root: Node, action = None, spaces=0):
-    #as a path in dir system
+def print_mstc_tree(root: Node, action=None, spaces=0):
+    # as a path in dir system
     if action is None:
         # print("root print")
         action = ""
@@ -311,7 +311,6 @@ def print_mstc_tree(root: Node, action = None, spaces=0):
     for action, child in root.children.items():
         # print("something")
         print_mstc_tree(child, action, sublevel)
-
 
 
 def select_action(config: AlphaZeroConfig, root: Node, runs: int):
@@ -386,7 +385,7 @@ def legal_actions(game):
 
 # We use the neural network to obtain a value and policy prediction.
 def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
-    #don't expand finished game
+    # don't expand finished game
     if game.winner is not None:
         if not config.already_reached_end:
             print("final node reached won?: [+ winning node, - loosing node]")
@@ -395,7 +394,7 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
             config.already_reached_end = True
         print("+" if node.value_sum > 0 else "-", end="")
 
-        return node.value_sum # TODO possible bug - we may need to update the sum (due to the count value goes in limits to 0)
+        return node.value_sum  # TODO possible bug - we may need to update the sum (due to the count value goes in limits to 0)
         # node.value_sum += 1 if node.value_sum > 0 else 0 # TODO uncomment if bug
 
     node.to_play = game.to_play
@@ -447,13 +446,15 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
     #
     # return value
 
+
 _REPRESENTATION = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [1, 0, 0, 1], [0, 1, 0, 1]], dtype=np.bool)
 _ACTION_Y = np.array([0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6],
                      dtype=np.int8)
 _ACTION_X = np.array([0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6],
                      dtype=np.int8)
-def game2array(az_quiz : az_quiz.AZQuiz):
 
+
+def game2array(az_quiz: az_quiz.AZQuiz):
     board = az_quiz.board
     board28 = []
     for i in range(28):
@@ -479,7 +480,6 @@ def game2array(az_quiz : az_quiz.AZQuiz):
     return board28
 
 
-
 def print_game_situation(self):
     SYMBOLS = [".", "*", "O", "X"]
 
@@ -494,6 +494,7 @@ def print_game_situation(self):
         action += j + 1
 
     print("\n".join(board), flush=True)
+
 
 def keyboard_value_input(self):
     SYMBOLS = [".", "*", "O", "X"]
