@@ -113,9 +113,9 @@ class Network:
         filepath = self.file_location()
         line = ""
         with open(filepath, 'rU') as f:
-            for l in f:
-                print(l)
-                line = l
+            for tmpLine in f:
+                print(tmpLine)
+                line = tmpLine
 
         weights = self.parse_weights(line)
         self.model.set_weights(weights)
@@ -289,8 +289,7 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
         # print_children(node)
         backpropagate(search_path, value, player)
 
-    root2 = root
-    # print_mstc_tree(root2)
+    # print_mstc_tree(root)
     return select_action(config, root, runs), root
 
 
@@ -348,9 +347,6 @@ def sample_random_child(config: AlphaZeroConfig, node: Node):
     triples_probability = list(map(lambda x: 0 if x < 0 else x / triples_scores_sum, triples_scores))
 
     indexes = list(range(len(triples)))
-
-    for a, ch in node.children.items():
-        score = ucb_score(config, node, ch)
 
     index = np.random.choice(indexes, 1, p=triples_probability)[0]
     _, action, child = triples[index]
@@ -473,6 +469,9 @@ def game2array(az_quiz: az_quiz.AZQuiz):
                 found = True
                 board28.append(j)
                 break
+
+        if not found:
+            raise
 
     # print(board28)
     # print(az_quiz.to_play)
