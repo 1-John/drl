@@ -36,7 +36,7 @@ class AlphaZeroConfig(object):
 class Node(object):
     def __init__(self, prior: float = None):
         self.visit_count = 0
-        self.to_play = -1
+        self.to_play = -1 #None
         self.prior = prior if prior is not None else 0.03571  # 1/28
         self.value_sum = 0  # "sum" of value function of the children
         self.children = {}
@@ -176,18 +176,18 @@ def alphazero(config: AlphaZeroConfig):
 
         # state - DONE
         # policy - je to action? nn -- je to output values??? tzn 28 length?
-        # value -
+        # myslim si ze ano, ma to byt to co vraci jednotlive nody - jako node .value pro sve deti
+        # value - target_value - node value
 
         if i > save_at_step:
             network.save_network(save_at_step)
             save_at_step *= 2
 
-        train_network(config,
-                      saved)  # saved je pole -> trojic (state, target_policy, target_value) # TODO create this 3-tuple
+        # saved je pole -> trojic (state, target_policy, target_value) # TODO create this 3-tuple
+        train_network(config, saved)
 
-        # vraci
-        # TODO when finished - save network so we can load it in recodex and not train
     network.save_network()
+    print('saving network to:', Network.file_location())
 
     return
 
@@ -202,7 +202,7 @@ def play_game(config: AlphaZeroConfig):
     while not game.winner and moves < config.max_moves:
         moves += 1
         action, root = run_mcts(config, game)
-
+        #TODO chybi tady simulace
         history.append(game.clone(), (game2array(game), action))
     return history
 
@@ -211,31 +211,19 @@ def softmax_sample_index(z):
     """Compute softmax values for each sets of scores in x."""
 
     x = [z[0] for z in z]
+    actions = [z[0] for z in z]
 
-    # result = np.exp(x) / np.sum(np.exp(x), axis=0)
     result = np.exp(x) / np.sum(np.exp(x))
-    result = [(val, idx) for idx, val in enumerate(result)]
-    # print(result)
-    chosen_index = max_arg(result)
-    # print(y)
-    result.sort(key=lambda x: -x[0])
-    # print (result)
 
-    # print(y)
-
-    # result contains list of pst with indexes -sample from it
-    while len(result) > 1:
-        if np.random.random() > 0.8:
-            result.pop(0)
-            chosen_index = result[0][1]
-        else:
-            break
-
-    if len(result) == 1:
-        return result[0][1]
-
-    return chosen_index
-
+    probabilities = [0 if p < 0 else p for p in result]
+    sum_p = sum(probabilities)
+    if sum_p == 0:
+        index = np.random.choice(len(probabilities))
+    else:
+        indexes = list(range(len(probabilities)))
+        probabilities = list(map(lambda p: p / sum_p, probabilities))
+        index = np.random.choice(indexes, 1, p=probabilities)[0]
+    return actions[index]
 
 def max_arg(x):
     maximum = -1
@@ -316,7 +304,7 @@ def select_action(config: AlphaZeroConfig, root: Node, runs: int):
     visit_counts = [(child.visit_count, action)
                     for action, child in root.children.items()]
     if runs < config.num_sampling_moves:
-        print("visit_counts", visit_counts)
+        print("runs", runs)
         action = softmax_sample_index(visit_counts)
     else:
         _, action = max(visit_counts, key=lambda x: x[0])
@@ -388,6 +376,14 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
             print(os.path.realpath(__file__))
             print(time.localtime())
             config.already_reached_end = True
+
+        if node.to_play == -1:
+            node.to_play = None
+            node.value_sum = 1 if game.winner == player else 0
+            node.prior = 1 if game.winner == player else 0.001 #somewhat hotfix
+            # print("changed to play to None", node.value_sum)
+
+        # print("node.value_sum", node.value_sum)
         print("+" if node.value_sum > 0 else "-", end="")
 
         return node.value_sum  # TODO possible bug - we may need to update the sum (due to the count value goes in limits to 0)
@@ -507,8 +503,7 @@ def keyboard_value_input(self):
             print("wrong value", flush=True)
 
 
-# At the end of a simulation, we propagate the evaluation all the way up the
-# tree to the root.
+# At the end of a simulation, we propagate the evaluation all the way up the tree to the root.
 def backpropagate(search_path: List[Node], value: float, to_play):
     for node in search_path:
         node.value_sum += value if node.to_play == to_play else (1 - value)
@@ -532,14 +527,22 @@ class Player:
     init_player = -1
 
     def play(self, az_quiz: az_quiz.AZQuiz):
+
+        if self.init_player != az_quiz.to_play:
+            self.init_player = -1  # this changes when table is turned! that is why it has to be reevaluated
+
         if self.init_player == -1:
             self.config = AlphaZeroConfig()
             self.init_player = az_quiz.to_play
-            print("Player nr:", self.init_player)
+            print("(new? start) Player nr:", self.init_player)
 
-        # for action in CENTER + ANCHORS + [27] + list(range(0)):
-        #     if az_quiz.valid(action):
-        #         return action
+        debug = False
+        if debug:
+            CENTER = [12]
+            ANCHORS = [4, 16, 19]
+            for action in CENTER + ANCHORS + [27] + list(range(11)):
+                if az_quiz.valid(action):
+                    return action
 
         # time.sleep(0.3)
         action, root = run_mcts(self.config, az_quiz)
@@ -554,7 +557,8 @@ class Player:
 if __name__ == "__main__":
     import az_quiz_evaluator_recodex
 
-    if False:
+    # if False:
+    if True:
         az_quiz_evaluator_recodex.evaluate(Player())
         exit()
 
@@ -563,10 +567,12 @@ if __name__ == "__main__":
 
     deterministic = importlib.import_module("az_quiz_player_deterministic").Player()
     random = importlib.import_module("az_quiz_player_random").Player()
+    heuristic = importlib.import_module("az_quiz_player_simple_heuristic").Player()
+
 
     # players = [Player(), deterministic]
     # players = [Player(), random]
-    players = [Player(), Player()]
+    players = [Player(), heuristic]
 
     randomized = False
     render = True
