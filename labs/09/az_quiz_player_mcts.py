@@ -36,7 +36,7 @@ class AlphaZeroConfig(object):
 class Node(object):
     def __init__(self, prior: float = None):
         self.visit_count = 0
-        self.to_play = -1 #None
+        self.to_play = -1  # None
         self.prior = prior if prior is not None else 0.03571  # 1/28
         self.value_sum = 0  # "sum" of value function of the children
         self.children = {}
@@ -46,7 +46,7 @@ class Node(object):
 
     def value(self):
         if self.visit_count == 0:
-            return 0
+            return self.value_sum
         return self.value_sum / self.visit_count
 
 
@@ -123,6 +123,11 @@ class Network:
     @staticmethod
     def parse_weights(line):
         return [0] * 28  # todo parse the line
+
+
+def get_readible_date():
+    t = time.localtime()
+    return f"{t.tm_year}_{t.tm_mon}_{t.tm_yday}_{t.tm_hour}:{t.tm_min}:{t.tm_sec}"
 
 
 ##TRAINING CODE FROM ALPHA ZERO
@@ -202,8 +207,8 @@ def play_game(config: AlphaZeroConfig):
     while not game.winner and moves < config.max_moves:
         moves += 1
         action, root = run_mcts(config, game)
-        #TODO chybi tady simulace
-        history.append(game.clone(), (game2array(game), action))
+        # TODO chybi tady simulace
+        history.append(game.clone(), (game2array(game), action, root))  # root probably always the same...
     return history
 
 
@@ -224,6 +229,7 @@ def softmax_sample_index(z):
         probabilities = list(map(lambda p: p / sum_p, probabilities))
         index = np.random.choice(indexes, 1, p=probabilities)[0]
     return actions[index]
+
 
 def max_arg(x):
     maximum = -1
@@ -275,7 +281,7 @@ def run_mcts(config: AlphaZeroConfig, game: az_quiz):
         value = evaluate(node, scratch_game, config, player)
         # print("chosen actinos:", search_path_actions)
         # print_children(node)
-        backpropagate(search_path, value, player)
+        backpropagate(search_path, value, player, scratch_game.winner)
 
     # print_mstc_tree(root)
     return select_action(config, root, runs), root
@@ -380,7 +386,7 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
         if node.to_play == -1:
             node.to_play = None
             node.value_sum = 1 if game.winner == player else 0
-            node.prior = 1 if game.winner == player else 0.001 #somewhat hotfix
+            node.prior = 1 if game.winner == player else 0.001  # somewhat hotfix
             # print("changed to play to None", node.value_sum)
 
         # print("node.value_sum", node.value_sum)
@@ -409,6 +415,7 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
         raise
     for action, p in policy.items():
         node.children[action] = Node(p / policy_sum)
+
     return value
 
     # MCTS version if at the end set correctly else 0.5, it gets fixed on backprop...
@@ -504,10 +511,47 @@ def keyboard_value_input(self):
 
 
 # At the end of a simulation, we propagate the evaluation all the way up the tree to the root.
-def backpropagate(search_path: List[Node], value: float, to_play):
+def backpropagate(search_path: List[Node], value: float, to_play, winner):
     for node in search_path:
-        node.value_sum += value if node.to_play == to_play else (1 - value)
-        node.visit_count += 1
+        if node.to_play == None:  # winner known
+            # value is taken from last node.value_sum (at beginning 0 or 1)
+
+            # node.value_sum += value if winner == to_play else (1 - value) # TODO First player win rate after 100 games: 29.00% (24.00% and 34.00% when starting and not starting)
+            # node.value_sum += (value) #SPATNE VYSLEDKY
+
+            # sum_for_greater = node.value_sum + (1 if node.value_sum > 0 else 0) # TODO First player win rate after 100 games: 79.00% (88.00% and 70.00% when starting and not starting) take two: 79.00 % (84.00 % and 74.0)
+
+            # sum_for_win = node.value_sum + (value if winner != to_play else (1 - value)) # TODO First player win rate after 100 games: 73.00% (82.00% and 64.00% when starting and not starting) take two:: 83.00 % (90.00 % and 76.00 %)
+            # sum_for_win2 = node.value_sum + (1 if winner != to_play else 0) # TODO First player win rate after 100 games: 69.00% (72.00% and 66.00% when starting and not starting)
+            # sum_for_win3 = node.value_sum + (1 if winner == to_play else 0) # same as sum > : TODO First player win rate after 100 games: 76.00% (78.00% and 74.00% when starting and not starting)
+
+            # sum_for_one_minus = node.value_sum + (1 - value) #TODO First player win rate after 100 games: 73.00% (84.00% and 62.00% when starting and not starting) take two: 72.00 % (78.00 % and 66.00)
+            # sum_for_one_minus equivalent to: node.value_sum++
+
+            node.value_sum += (1 if node.value_sum > 0 else 0)
+            node.visit_count += 1
+            # # if(sum_for_greater != sum_for_win3):
+            # #     print ("differ",sum_for_greater, sum_for_win3)
+            # # node.value_sum = sum_for_win3
+            #
+            # # if (sum_for_greater != sum_for_win or sum_for_win != sum_for_one_minus):
+            # #     print("difference")
+            # #     print(sum_for_greater, sum_for_win, sum_for_one_minus)
+            # #
+            # #     if sum_for_greater != sum_for_win:
+            # #         print(" > != win")
+            # #     if sum_for_greater != sum_for_one_minus:
+            # #         print(" > != 1-")
+            # #     if sum_for_win != sum_for_one_minus:
+            # #         print(" win != 1-")
+            # # else:
+            # #     print("same, ", end="")
+            # #
+            # # node.value_sum = sum([sum_for_greater, sum_for_win, sum_for_one_minus]) / 3.0 # First player win rate after 100 games: 67.00% (78.00% and 56.00% when starting and not starting)
+
+        else:
+            node.value_sum += value if node.to_play == to_play else (1 - value)
+            node.visit_count += 1
 
 
 # At the start of each search, we add dirichlet noise to the prior of the root
@@ -556,7 +600,6 @@ class Player:
 
 if __name__ == "__main__":
     import az_quiz_evaluator_recodex
-
     # if False:
     if True:
         az_quiz_evaluator_recodex.evaluate(Player())
@@ -568,7 +611,6 @@ if __name__ == "__main__":
     deterministic = importlib.import_module("az_quiz_player_deterministic").Player()
     random = importlib.import_module("az_quiz_player_random").Player()
     heuristic = importlib.import_module("az_quiz_player_simple_heuristic").Player()
-
 
     # players = [Player(), deterministic]
     # players = [Player(), random]
