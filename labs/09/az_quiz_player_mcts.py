@@ -14,7 +14,7 @@ class AlphaZeroConfig(object):
         ### Self-Play
         self.num_sampling_moves = 0  # 30  # tells how many game moves will be possibly random
         self.max_moves = 30  # depth of the search 28 for az-kviz 512 for chess and shogi, 722 for Go.
-        self.num_simulations = 500  # 800 number of paths in mcts
+        self.num_simulations = 500 #500 proslo recodexem # 800 number of paths in mcts First player win rate after 100 games: 71.00% (78.00% and 64.00% when starting and not starting)
 
         # Root prior exploration noise.
         self.root_dirichlet_alpha = 0.03  # for chess, 0.03 for Go and 0.15 for shogi.
@@ -28,7 +28,8 @@ class AlphaZeroConfig(object):
         self.network = Network(self)
 
         self.init_player = -1
-        self.games_per_training = 20  # nr of games for each training
+        self.games_per_training = 20  # nr of games for each training #FIXME this number has to be even
+        self.trainings = 20 # 10_000_000:
 
         self.already_reached_end = False
 
@@ -46,9 +47,23 @@ class Node(object):
 
     def value(self):
         if self.visit_count == 0:
-            return self.value_sum
-        return self.value_sum / self.visit_count
+            return self.value_sum if (0 <= self.value_sum <= 1) else 0 if self.value_sum < 0 else 1
+        return self.value_sum / self.visit_count # TODO make sure it will be only [0..1]
 
+    def shallowish_clone(self): # first level children only
+        clone = self.no_child_clone()
+
+        for action, node in self.children.items():
+            self.children[action] = node.no_child_clone()
+
+        return clone
+
+    def no_child_clone(self):
+        clone = Node(self.prior)
+        clone.visit_count = self.visit_count
+        clone.to_play = self.to_play
+        clone.value_sum = self.value_sum
+        return clone
 
 class Network:
     def __init__(self, args):
@@ -154,63 +169,107 @@ def update_weights(optimizer: tf.optimizers, network: Network, batch, weight_dec
     optimizer.minimize(loss)
 
 
-# ######### End Training ###########
-# ##################################
-
-
-# AlphaZero training is split into two independent parts: Network training and self-play data generation.
 def alphazero(config: AlphaZeroConfig):
     network = config.network
 
-    i = 0
+    limit = 0
     save_at_step = 1
-    histories = []  # game simulation takes a long time - so remember everything and train over and over on past games
+    saved = []
+    another_player = importlib.import_module("az_quiz_player_simple_heuristic").Player()
 
-    while True and i < 20:  # 10_000_000:
-        i += 1
+    while True and limit < config.trainings:
+        limit += 1
         # TODO while enough time OR not sufficient quality do [selfplay (even multiple for batch) -> train cycle]
         for i in range(config.games_per_training):
-            history = play_game(config)
+            history, win = play_game(config, another_player, bool(i % 2))
 
-            network.predict(history)
-            histories.append(history)
+            print()
+            print (history)
+            for state, policy, value in history:
+                if value > 1 or value < 0:
+                    print("value out of bounds:", value)
+                saved.append((state, policy, value))
 
-        # history :- game, state, action     //   game.clone(), game2array(game), action
+            #edit last by real result
+            if win is not None:
+                saved[-1] = (saved[0], saved[1], 1 if win else 0)
 
-        # saved :- state, policy, value
+        train_network(config, saved)
+        # saved = []
+        print("training of one network")
 
-        # state - DONE
-        # policy - je to action? nn -- je to output values??? tzn 28 length?
-        # myslim si ze ano, ma to byt to co vraci jednotlive nody - jako node .value pro sve deti
-        # value - target_value - node value
-
-        if i > save_at_step:
+        if limit > save_at_step:
             network.save_network(save_at_step)
             save_at_step *= 2
 
-        # saved je pole -> trojic (state, target_policy, target_value) # TODO create this 3-tuple
-        train_network(config, saved)
-
-    network.save_network()
     print('saving network to:', Network.file_location())
-
+    network.save_network()
     return
+
+
+def get_policy(node:Node):
+    policy = [0] * 28
+    for action, child in node.children.items():
+        policy[action] = child.value()
+
+    return normalize_to_one(policy)
+
+
+def normalize_to_one(double_array):
+    summ = sum(double_array)
+    if summ == 0:
+        positive = [d if d>0 else 0 for d in double_array]
+        if sum(positive) == 0:
+            return positive
+        return normalize_to_one(positive)
+
+    #may contain negative values
+    return [d/summ for d in double_array]
 
 
 # Each game is produced by starting at the initial board position, then
 # repeatedly executing a Monte Carlo Tree Search to generate moves until the end
 # of the game is reached.
-def play_game(config: AlphaZeroConfig):
+def play_game(config: AlphaZeroConfig, another_player, alternate):
     game = az_quiz.AZQuiz(randomized=False)
     moves = 0
     history = []
-    while not game.winner and moves < config.max_moves:
-        moves += 1
-        action, root = run_mcts(config, game)
-        # TODO chybi tady simulace
-        history.append(game.clone(), (game2array(game), action, root))  # root probably always the same...
-    return history
 
+    while not (game.winner is not None) and moves < config.max_moves:
+        moves += 1
+
+        if alternate:
+            game.move(another_player.play(game.clone()))
+            if game.winner is not None:
+                break
+
+        action, root = run_mcts(config, game)
+        game_array = game2array(game)
+        policy = get_policy(root)
+        value = root.value()
+
+        game.move(action)    # TODO missing simulation protection against incorrect action
+        history.append((game_array, policy, value)) #previously contained game.clone and action
+
+        if not alternate:
+            if game.winner is None:
+                game.move(another_player.play(game.clone()))
+
+    return history, who_won(game, alternate)
+
+
+def who_won(game, alternate):
+    if game.winner is None:
+        return None
+
+    if alternate and game.winner == 1:
+        return True
+    if not alternate and game.winner == 0:
+        return True
+    return False
+
+# ######### End Training ###########
+# ##################################
 
 def softmax_sample_index(z):
     """Compute softmax values for each sets of scores in x."""
@@ -599,6 +658,13 @@ class Player:
 
 
 if __name__ == "__main__":
+    train = True
+    if train:
+        import importlib
+        alphazero(AlphaZeroConfig())
+
+        exit()
+
     import az_quiz_evaluator_recodex
     # if False:
     if True:
