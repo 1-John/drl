@@ -25,10 +25,22 @@ class AlphaZeroConfig(object):
         self.pb_c_init = 1.25  # dle videa 2
 
         self.learning_rate = 0.002
+
+        self.learning_rate_schedule = {
+            0: 2e-1,
+            1e3: 2e-2,
+            3e3: 2e-3,
+            5e3: 2e-4
+        }
+
+        self.optimizer = None
+        self.weight_decay = 1e-4
+        self.momentum = 0.9
+
         self.network = Network(self)
 
         self.init_player = -1
-        self.games_per_training = 20  # nr of games for each training #FIXME this number has to be even
+        self.games_per_training = 2 #20  # nr of games for each training #FIXME this number has to be even
         self.trainings = 20 # 10_000_000:
 
         self.already_reached_end = False
@@ -37,7 +49,7 @@ class AlphaZeroConfig(object):
 class Node(object):
     def __init__(self, prior: float = None):
         self.visit_count = 0
-        self.to_play = -1  # None
+        self.to_play = -1  # None when end is reached
         self.prior = prior if prior is not None else 0.03571  # 1/28
         self.value_sum = 0  # "sum" of value function of the children
         self.children = {}
@@ -46,6 +58,8 @@ class Node(object):
         return len(self.children) > 0
 
     def value(self):
+        if self.to_play is None: # finished game node
+            return 1 if self.value_sum > 0.5 else 0
         if self.visit_count == 0:
             return self.value_sum if (0 <= self.value_sum <= 1) else 0 if self.value_sum < 0 else 1
         return self.value_sum / self.visit_count # TODO make sure it will be only [0..1]
@@ -147,11 +161,12 @@ def get_readible_date():
 
 ##TRAINING CODE FROM ALPHA ZERO
 def train_network(config: AlphaZeroConfig, batch):
+    if config.optimizer is None:
+        config.optimizer = tf.optimizers.SGD(config.learning_rate_shedule, config.momentum)
+
     network = config.network
-    optimizer = tf.train.MomentumOptimizer(config.learning_rate_schedule,
-                                           config.momentum)
-    for i in range(config.training_steps):
-        update_weights(optimizer, network, batch, config.weight_decay)
+    optimizer = config.optimizer
+    update_weights(optimizer, network, batch, config.weight_decay)
 
 
 def update_weights(optimizer: tf.optimizers, network: Network, batch, weight_decay: float):
@@ -184,7 +199,7 @@ def alphazero(config: AlphaZeroConfig):
             history, win = play_game(config, another_player, bool(i % 2))
 
             print()
-            print (history)
+            print("history:",history)
             for state, policy, value in history:
                 if value > 1 or value < 0:
                     print("value out of bounds:", value)
@@ -450,16 +465,28 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
 
         # print("node.value_sum", node.value_sum)
         print("+" if node.value_sum > 0 else "-", end="")
+        if (node.value_sum != 0 and node.value_sum != 1):
+            print("this should nevvvvvvver (except for the exploration noise) happen v != 0 or v != 1", node.value_sum)
+        if node.value_sum > 1:
+            node.value_sum = 1
 
-        return node.value_sum  # TODO possible bug - we may need to update the sum (due to the count value goes in limits to 0)
-        # node.value_sum += 1 if node.value_sum > 0 else 0 # TODO uncomment if bug
+        node.visit_count += 1
+        return node.value_sum  # 0 or 1
 
     node.to_play = game.to_play
     network = config.network
 
     gamestate = game2array(game)
-
     policy_logits, value = network.predict(gamestate)
+
+    if value > 2 or value < -1: # TODO should value be between 1 and 0?
+        print("value should be withing [0..1]:", value)
+
+    if value < 0:
+        value = 0.0
+    elif value > 1:
+        value = 1.0
+
     if not (isinstance(value, (np.float32, float))):
         print("Ha - value from network evaluation", value)
         print(type(value))
@@ -470,7 +497,7 @@ def evaluate(node: Node, game: az_quiz, config: AlphaZeroConfig, player):
     policy = {a: math.exp(policy_logits[a]) for a in legal_actions(game)}
     policy_sum = sum(policy.values())
     if not (isinstance(policy_sum, float)):
-        print("problem", value)
+        print("problem with policy sum", policy_sum)
         raise
     for action, p in policy.items():
         node.children[action] = Node(p / policy_sum)
@@ -572,7 +599,16 @@ def keyboard_value_input(self):
 # At the end of a simulation, we propagate the evaluation all the way up the tree to the root.
 def backpropagate(search_path: List[Node], value: float, to_play, winner):
     for node in search_path:
-        if node.to_play == None:  # winner known
+        if node.to_play is not None:  # winner not known
+            node.value_sum += value if node.to_play == to_play else (1 - value)
+            node.visit_count += 1
+
+        #else:
+            # node.value_sum += (1 if node.value_sum > 0 else 0) # TODO 70.00% (78.00% and 62.00% when starting and not starting)
+            # node.visit_count += 1
+            # for 3500 mcts 72.00% (74.00% and 70.00% when starting and not starting) take 2: 79.00% (80.00% and 78.00% when starting and not starting)
+
+
             # value is taken from last node.value_sum (at beginning 0 or 1)
 
             # node.value_sum += value if winner == to_play else (1 - value) # TODO First player win rate after 100 games: 29.00% (24.00% and 34.00% when starting and not starting)
@@ -587,8 +623,6 @@ def backpropagate(search_path: List[Node], value: float, to_play, winner):
             # sum_for_one_minus = node.value_sum + (1 - value) #TODO First player win rate after 100 games: 73.00% (84.00% and 62.00% when starting and not starting) take two: 72.00 % (78.00 % and 66.00)
             # sum_for_one_minus equivalent to: node.value_sum++
 
-            node.value_sum += (1 if node.value_sum > 0 else 0)
-            node.visit_count += 1
             # # if(sum_for_greater != sum_for_win3):
             # #     print ("differ",sum_for_greater, sum_for_win3)
             # # node.value_sum = sum_for_win3
@@ -607,10 +641,6 @@ def backpropagate(search_path: List[Node], value: float, to_play, winner):
             # #     print("same, ", end="")
             # #
             # # node.value_sum = sum([sum_for_greater, sum_for_win, sum_for_one_minus]) / 3.0 # First player win rate after 100 games: 67.00% (78.00% and 56.00% when starting and not starting)
-
-        else:
-            node.value_sum += value if node.to_play == to_play else (1 - value)
-            node.visit_count += 1
 
 
 # At the start of each search, we add dirichlet noise to the prior of the root
