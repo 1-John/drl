@@ -7,6 +7,7 @@ from typing import List
 from functools import reduce
 import time
 import os
+import marshal
 
 
 class AlphaZeroConfig(object):
@@ -14,7 +15,7 @@ class AlphaZeroConfig(object):
         ### Self-Play
         self.num_sampling_moves = 0  # 30  # tells how many game moves will be possibly random
         self.max_moves = 30  # depth of the search 28 for az-kviz 512 for chess and shogi, 722 for Go.
-        self.num_simulations = 500 #500 proslo recodexem # 800 number of paths in mcts First player win rate after 100 games: 71.00% (78.00% and 64.00% when starting and not starting)
+        self.num_simulations = 5 #00 #500 proslo recodexem # 800 number of paths in mcts First player win rate after 100 games: 71.00% (78.00% and 64.00% when starting and not starting)
 
         # Root prior exploration noise.
         self.root_dirichlet_alpha = 0.03  # for chess, 0.03 for Go and 0.15 for shogi.
@@ -41,7 +42,7 @@ class AlphaZeroConfig(object):
 
         self.init_player = -1
         self.games_per_training = 2 #20  # nr of games for each training #FIXME this number has to be even
-        self.trainings = 20 # 10_000_000:
+        self.trainings = 1 #20 # 10_000_000:
 
         self.already_reached_end = False
 
@@ -105,16 +106,6 @@ class Network:
             experimental_run_tf_function=False
         )
 
-        ###0###print(self.model.summary())
-
-    def train(self, states, actions, returns):
-        actions = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), actions)))
-        returns = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), returns)))
-        states = np.array(list(reduce(lambda a, b: np.concatenate((a, b)), states)))
-
-        weight = returns  # - baselines (if there is baseline available)
-        self.model.train_on_batch(states, actions, sample_weight=weight)
-
     def predict(self, states_in):
         states = np.array([states_in])
 
@@ -123,46 +114,64 @@ class Network:
 
         return result[0:1], result[1][0][0]  # it is double array of one value [[v]]
 
+    def predict2(self, states_in): #same as 1 but no unpacking
+        states = np.array([states_in])
+
+        result = self.model.predict(states)
+        # first actions, then quality
+
+        return result[0:1], result[1]  # it is double array of one value [[v]]
+
+
     @staticmethod
-    def file_location():
-        return os.path.realpath(__file__) + "_trained_network.txt"
+    def create_new_filename(suffix: str = ""):
+        return os.path.realpath(__file__) + "_trained_network_" + get_readable_date() + suffix + ".txt"
 
     def save_network(self, number=0):
-        filepath = self.file_location()
-        f = open(filepath, 'a')
-        f.write(time.localtime())
+
         if number != 0:
-            f.write('saved at step: ' + str(number))
-        f.write('\n')
-        f.write(self.model.get_weights())
-        f.write('\n')
+            suffix = "-" + str(number)
+            filepath = self.create_new_filename(suffix)
+        else:
+            filepath = self.create_new_filename()
+
+            print('saving network to:', filepath)
+
+        f = open(filepath, 'wb')
+        w = self.model.get_weights()
+        np.save(f, w)
         f.close()
 
     def load_latest_network(self):
-        filepath = self.file_location()
-        line = ""
-        with open(filepath, 'rU') as f:
-            for tmpLine in f:
-                print(tmpLine)
-                line = tmpLine
+        path = os.path.realpath(__file__)
+        path = os.path.dirname(path)
+        path = os.path.realpath(path)
+        files = os.listdir(path)
+        print (files)
+        paths = [os.path.join(path, basename) for basename in filter(lambda x: x[-4:] == ".txt", files)]
+        print(paths)
+        youngest = max(paths, key=os.path.getctime)
+        print(youngest)
+        self.load_network_from_file(youngest)
 
-        weights = self.parse_weights(line)
-        self.model.set_weights(weights)
+    def load_network_from_file(self, fullpath):
+        f = open(fullpath, 'rb')
+        w = np.load(f, allow_pickle=True)
+        self.model.set_weights(w)
+        f.close()
+        print("file", fullpath, "loaded")
 
-    @staticmethod
-    def parse_weights(line):
-        return [0] * 28  # todo parse the line
 
-
-def get_readible_date():
+def get_readable_date():
     t = time.localtime()
-    return f"{t.tm_year}_{t.tm_mon}_{t.tm_yday}_{t.tm_hour}:{t.tm_min}:{t.tm_sec}"
+    # return f"{t.tm_year}_{t.tm_mon}_{t.tm_yday}_{t.tm_hour}:{t.tm_min}:{t.tm_sec}"
+    return f"{t.tm_year}_{t.tm_mon}_{t.tm_yday}_{t.tm_hour}-{t.tm_min}-{t.tm_sec}"
 
 
 ##TRAINING CODE FROM ALPHA ZERO
 def train_network(config: AlphaZeroConfig, batch):
     if config.optimizer is None:
-        config.optimizer = tf.optimizers.SGD(config.learning_rate_shedule, config.momentum)
+        config.optimizer = tf.optimizers.SGD(config.learning_rate_schedule, config.momentum)
 
     network = config.network
     optimizer = config.optimizer
@@ -199,7 +208,7 @@ def alphazero(config: AlphaZeroConfig):
             history, win = play_game(config, another_player, bool(i % 2))
 
             print()
-            print("history:",history)
+            # print("history:",history)
             for state, policy, value in history:
                 if value > 1 or value < 0:
                     print("value out of bounds:", value)
@@ -207,7 +216,8 @@ def alphazero(config: AlphaZeroConfig):
 
             #edit last by real result
             if win is not None:
-                saved[-1] = (saved[0], saved[1], 1 if win else 0)
+                s = saved[-1]
+                saved[-1] = (s[0], s[1], 1 if win else 0)
 
         train_network(config, saved)
         # saved = []
@@ -217,7 +227,6 @@ def alphazero(config: AlphaZeroConfig):
             network.save_network(save_at_step)
             save_at_step *= 2
 
-    print('saving network to:', Network.file_location())
     network.save_network()
     return
 
