@@ -180,18 +180,35 @@ def train_network(config: AlphaZeroConfig, batch):
 
 def update_weights(optimizer: tf.optimizers, network: Network, batch, weight_decay: float):
     loss = 0
-    for (state, target_policy, target_value) in batch:
-        policy_logits, value = network.predict(state)
-        loss += (
-                tf.losses.mean_squared_error(value, target_value) +
-                tf.nn.softmax_cross_entropy_with_logits(
-                    logits=policy_logits, labels=target_policy))
 
-    for weights in network.get_weights():
+    for (state, target_policy, target_value) in batch:
+        policy_logits, value = network.predict2(state)
+        valueLoss = tf.losses.mean_squared_error(value, target_value)
+        logits = tf.nn.softmax_cross_entropy_with_logits(logits=policy_logits, labels=target_policy)
+
+        loss += tf.cast(valueLoss, tf.float32) + logits
+
+    for weights in network.model.get_weights():
         loss += weight_decay * tf.nn.l2_loss(weights)
 
-    optimizer.minimize(loss)
+    variables = network.model.variables                                  #FIXME - not working
+    gradients = None                                                     #FIXME - not working
+    with tf.GradientTape() as tape:                                      #FIXME - not working
+        gradients = tape.gradient(loss, variables)                       #FIXME - not working
+    # optimizer.apply_gradients(zip(gradients,variables))                #FIXME - not working
+    optimizer.minimize(lambda: loss, network.model.variables, gradients) #FIXME - not working
+    print("minimized!")
 
+    #code from alphago:
+    # optimizer.minimize(loss)
+
+    # copied code from ddpg
+    # with tf.GradientTape() as tape:
+    #     actions = self.actor(states, training=True)
+    #     values = self.critic((states, actions), training=False)[:, 0]
+    #     loss = -tf.math.reduce_mean(values)
+    # actor_grads = tape.gradient(loss, self.actor.variables)
+    # self._actor_optimizer.apply_gradients(zip(actor_grads, self.actor.variables))
 
 def alphazero(config: AlphaZeroConfig):
     network = config.network
